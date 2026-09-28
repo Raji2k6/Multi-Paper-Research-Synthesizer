@@ -1,0 +1,3 @@
+import { Send } from 'lucide-react'
+
+export default function ChatInput({ value, onChange, onSubmit, disabled, placeholder, buttonLabel = 'Ask' }) { return <form className="chat-form" onSubmit={(event) => { event.preventDefault(); onSubmit() }}><textarea className="text-input" rows="2" value={value} onChange={(event) => onChange(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); onSubmit() } }} placeholder={placeholder} disabled={disabled} /><button type="submit" className="button" disabled={disabled || !value.trim()}>{disabled ? 'Working...' : <><Send size={15} /> {buttonLabel}</>}</button></form> }

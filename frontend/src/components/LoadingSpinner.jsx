@@ -1,0 +1,1 @@
+export default function LoadingSpinner({ label = 'Working...' }) { return <span className="loading"><span className="spinner" />{label}</span> }

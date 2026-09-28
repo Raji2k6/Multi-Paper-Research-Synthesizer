@@ -1,0 +1,1 @@
+export default function SourceCard({ source }) { return <article className="source-card"><strong>{source.document_title || 'Untitled paper'}</strong><span>Page {source.page ?? '—'} · Document ID: {source.document_id ?? '—'}</span></article> }

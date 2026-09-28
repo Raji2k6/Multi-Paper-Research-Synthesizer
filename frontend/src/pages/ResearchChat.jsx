@@ -1,0 +1,10 @@
+import { useState } from 'react'
+import { chatWithResearch } from '../api/chatApi'
+import { getFriendlyError } from '../api/errors'
+import ChatInput from '../components/ChatInput'
+import ChatMessage from '../components/ChatMessage'
+import EmptyState from '../components/EmptyState'
+import ErrorMessage from '../components/ErrorMessage'
+import LoadingSpinner from '../components/LoadingSpinner'
+
+export default function ResearchChat() { const [question, setQuestion] = useState(''); const [messages, setMessages] = useState([]); const [loading, setLoading] = useState(false); const [error, setError] = useState(''); const submit = async () => { const text = question.trim(); if (!text || loading) return; setMessages((current) => [...current, { role: 'user', content: text }]); setQuestion(''); setError(''); setLoading(true); try { const result = await chatWithResearch(text); setMessages((current) => [...current, { role: 'ai', answer: result.answer, sources: result.sources }]) } catch (requestError) { setError(getFriendlyError(requestError)) } finally { setLoading(false) } }; return <><div className="page-heading"><span className="eyebrow">Grounded conversation</span><h1>Research Assistant</h1><p>Ask questions about your uploaded research papers.</p></div><section className="panel chat-panel"><ErrorMessage message={error} />{messages.length ? <div className="message-list">{messages.map((message, index) => <ChatMessage message={message} key={index} />)}{loading && <div className="message ai"><LoadingSpinner label="Researching..." /></div>}</div> : <EmptyState message="Your research conversation will appear here. Start with a question about the papers you uploaded." />}<ChatInput value={question} onChange={setQuestion} onSubmit={submit} disabled={loading} placeholder="Ask a question about your papers..." /></section></> }

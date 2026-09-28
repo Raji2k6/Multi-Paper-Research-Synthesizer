@@ -1,0 +1,9 @@
+import { useState } from 'react'
+import { synthesizePapers } from '../api/synthesisApi'
+import { getFriendlyError } from '../api/errors'
+import ChatInput from '../components/ChatInput'
+import ErrorMessage from '../components/ErrorMessage'
+import LoadingSpinner from '../components/LoadingSpinner'
+import SynthesisResult from '../components/SynthesisResult'
+
+export default function MultiPaperSynthesis() { const [question, setQuestion] = useState(''); const [result, setResult] = useState(null); const [loading, setLoading] = useState(false); const [error, setError] = useState(''); const submit = async () => { const text = question.trim(); if (!text || loading) return; setLoading(true); setError(''); setResult(null); try { setResult(await synthesizePapers(text)) } catch (requestError) { setError(getFriendlyError(requestError)) } finally { setLoading(false) } }; return <><div className="page-heading"><span className="eyebrow">Comparative analysis</span><h1>Multi-Paper Synthesis</h1><p>Compare findings across multiple research papers.</p></div><div className="content-grid synthesis-grid"><section className="panel"><h2>What should we compare?</h2><p className="panel-subtitle">Ask a focused question and the backend will retrieve evidence from multiple papers.</p><label className="field-label" htmlFor="synthesis-question">Research comparison question</label><ChatInput value={question} onChange={setQuestion} onSubmit={submit} disabled={loading} placeholder="Compare how the uploaded papers describe the Spiral Model..." buttonLabel="Analyze Papers" />{loading && <div className="processing"><LoadingSpinner label="Analyzing papers..." /></div>}<ErrorMessage message={error} /></section>{result ? <SynthesisResult result={result} /> : <section className="panel empty-state"><p>The synthesis will be organized into findings, common points, differences, contradictions, and an overall view.</p></section>}</div></> }
