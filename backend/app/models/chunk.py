@@ -1,7 +1,7 @@
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import Column, ForeignKey, Integer, Text
+from sqlalchemy import JSON, Column, ForeignKey, Integer, Text
 from sqlalchemy.orm import relationship
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
+
 from app.core.database import Base
 
 
@@ -14,7 +14,7 @@ class Chunk(Base):
 
     page_number = Column(Integer, nullable=False)
 
-    embedding = Column(Vector(384), nullable=False)
+    embedding = Column(Vector(384).with_variant(JSON(), "sqlite"), nullable=False)
 
     document_id = Column(
         Integer,

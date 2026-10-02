@@ -1,10 +1,10 @@
 import pdfplumber
-from nltk.tokenize import sent_tokenize
+import re
 
 from sqlalchemy.orm import Session
 
 from app.models.chunk import Chunk
-from app.services.embeddings import generate_embedding
+from app.services.embeddings import generate_embeddings
 
 
 CHUNK_SIZE = 500
@@ -28,16 +28,17 @@ def split_into_chunks(text: str, chunk_size: int = CHUNK_SIZE):
     """
     Split text into approximately chunk_size characters.
     """
-    sentences = sent_tokenize(text)
-
     chunks = []
     current = ""
 
-    for sentence in sentences:
+    for sentence in re.split(r"(?<=[.!?])\s+", text.strip()):
+        if not sentence:
+            continue
         if len(current) + len(sentence) < chunk_size:
             current += " " + sentence
         else:
-            chunks.append(current.strip())
+            if current.strip():
+                chunks.append(current.strip())
             current = sentence
 
     if current:
@@ -54,21 +55,24 @@ def save_chunks(
     """
     Create embeddings and save chunks.
     """
+    pending_chunks = []
     for page_number, text in pages:
-
         chunks = split_into_chunks(text)
-
         for chunk in chunks:
+            pending_chunks.append((page_number, chunk))
 
-            embedding = generate_embedding(chunk)
+    if not pending_chunks:
+        return 0
 
-            db_chunk = Chunk(
-                content=chunk,
+    embeddings = generate_embeddings([chunk for _, chunk in pending_chunks])
+    for (page_number, content), embedding in zip(pending_chunks, embeddings):
+        db.add(
+            Chunk(
+                content=content,
                 page_number=page_number,
                 embedding=embedding,
-                document_id=document_id
+                document_id=document_id,
             )
+        )
 
-            db.add(db_chunk)
-
-    db.commit()
+    return len(pending_chunks)

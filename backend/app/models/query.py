@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -13,6 +13,9 @@ class Query(Base):
     question = Column(Text, nullable=False)
 
     answer = Column(Text, nullable=False)
+    query_type = Column(String(20), nullable=False, default="chat", server_default="chat")
+    sources = Column(JSON, nullable=True)
+    documents_analyzed = Column(Integer, nullable=True)
 
     created_at = Column(
         DateTime(timezone=True),

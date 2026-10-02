@@ -4,3 +4,8 @@ export async function chatWithResearch(question) {
   const response = await api.post('/chat/', { question })
   return response.data
 }
+
+export async function getChatHistory() {
+  const response = await api.get('/chat/history')
+  return response.data
+}

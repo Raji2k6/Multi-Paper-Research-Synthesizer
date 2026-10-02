@@ -1,249 +1,146 @@
+import logging
+
 from openai import OpenAI
+from openai import OpenAIError
 
 from app.core.config import settings
 
 
-client = OpenAI(
-    api_key=settings.OPENROUTER_API_KEY,
-    base_url="https://openrouter.ai/api/v1"
-)
+logger = logging.getLogger(__name__)
+
+
+class LLMGenerationError(RuntimeError):
+    """The configured language-model provider could not generate an answer."""
+
+
+def uses_openrouter() -> bool:
+    backend = settings.LLM_BACKEND.lower()
+    if backend == "auto":
+        return bool(settings.OPENROUTER_API_KEY)
+    if backend == "local":
+        return False
+    if backend == "openrouter" and settings.OPENROUTER_API_KEY:
+        return True
+    raise ValueError(
+        "LLM_BACKEND must be 'auto' or 'local', or 'openrouter' with an API key."
+    )
+
+
+def _generate(prompt: str, model: str, timeout: float = 60) -> str:
+    client = OpenAI(
+        api_key=settings.OPENROUTER_API_KEY,
+        base_url="https://openrouter.ai/api/v1",
+        timeout=timeout,
+    )
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.2,
+        )
+    except OpenAIError as error:
+        logger.exception("Language-model provider request failed.")
+        raise LLMGenerationError(
+            "The language-model provider request failed."
+        ) from error
+
+    choices = getattr(response, "choices", None)
+    if not choices:
+        logger.warning("Language-model provider returned no completion choices.")
+        raise LLMGenerationError(
+            "The language-model provider returned no completion choices."
+        )
+
+    message = getattr(choices[0], "message", None)
+    answer = getattr(message, "content", None)
+    if not isinstance(answer, str) or not answer.strip():
+        logger.warning("Language-model provider returned an empty completion.")
+        raise LLMGenerationError(
+            "The language-model provider returned an empty completion."
+        )
+    return answer.strip()
+
+
+def _evidence_fallback(context: str, *, synthesis: bool) -> str:
+    if synthesis:
+        return (
+            "## Retrieved paper-wise evidence\n\n"
+            f"{context}\n\n"
+            "---\n"
+            "The hosted language-model provider did not return a usable "
+            "comparison. No findings or contradictions have been inferred; "
+            "the cited excerpts above are the evidence retrieved for this question."
+        )
+
+    return (
+        "## Retrieved evidence\n\n"
+        f"{context}\n\n"
+        "---\n"
+        "The hosted language-model provider did not return a usable answer. "
+        "These are the retrieved paper excerpts; use their paper and page "
+        "labels as citations."
+    )
 
 
 def generate_answer(question: str, context: str) -> str:
     """
-    Generate an answer using the retrieved research-paper context.
+    Generate a grounded answer, or return retrieved evidence in offline mode.
     """
+    if not uses_openrouter():
+        return _evidence_fallback(context, synthesis=False).replace(
+            "The hosted language-model provider did not return a usable answer. ",
+            "Hosted language-model generation is disabled. ",
+        )
 
     prompt = f"""
-You are an AI Research Assistant for a multi-paper research system.
-
-Answer the user's question using ONLY the information provided
-in the research-paper context.
-
-Rules:
-1. Do not use information that is not present in the context.
-2. If the context does not contain enough information to answer,
-   say:
-   "I couldn't find the answer in the uploaded research papers."
-3. When information comes from different documents, clearly
-   distinguish between them.
-4. Do not invent facts, citations, or conclusions.
+Answer the question using ONLY the supplied research-paper context.
+If it is insufficient, say so. Distinguish papers and cite page labels.
+Do not invent facts, citations, or conclusions.
 
 Research-paper context:
---------------------------------
 {context}
---------------------------------
 
-Question:
-{question}
-
-Answer:
+Question: {question}
 """
+    try:
+        return _generate(prompt, settings.OPENROUTER_MODEL)
+    except LLMGenerationError:
+        logger.warning("Returning retrieved evidence because chat generation failed.")
+        return _evidence_fallback(context, synthesis=False)
 
-    response = client.chat.completions.create(
-    model="qwen/qwen3.8-27b:free",
-    messages=[
-        {
-            "role": "user",
-            "content": prompt
-        }
-    ],
-    temperature=0.2
-    )
-
-    print("========== OPENROUTER RESPONSE ==========")
-    print(response)
-    print("=========================================")
-
-    return response.choices[0].message.content
 
 def generate_synthesis(question: str, paper_context: str) -> str:
     """
-    Generate a synthesis across multiple research papers.
+    Compare papers using supplied evidence, with an explicit offline mode.
     """
+    if not uses_openrouter():
+        return _evidence_fallback(paper_context, synthesis=True).replace(
+            "The hosted language-model provider did not return a usable comparison. ",
+            "Hosted language-model generation is disabled. ",
+        )
 
     prompt = f"""
-You are an AI Research Assistant specializing in multi-paper research analysis.
+Compare the research papers using ONLY the supplied evidence. Do not use outside
+knowledge or invent claims. Distinguish a difference from a contradiction;
+only identify contradictions when the claims are incompatible. Include paper
+and page citations, common findings, differences, contradictions, evidence gaps,
+and an overall synthesis.
 
-The user has uploaded multiple research papers.
-
-Your task is to answer the question by comparing the information
-provided from each paper.
-
-IMPORTANT RULES:
-
-1. Use ONLY the information provided in the paper context.
-2. Do not introduce outside knowledge.
-3. Do not invent claims.
-4. Clearly distinguish information from different papers.
-5. Identify common points between papers.
-6. Identify meaningful differences between papers.
-7. Only call something a contradiction if the papers actually
-   make conflicting claims.
-8. If there is no contradiction, explicitly say:
-   "No contradiction was identified in the retrieved evidence."
-9. Include page numbers when referring to information from a paper.
-
-Structure your response as:
-
-## Paper-wise Findings
-
-### Paper 1
-...
-
-### Paper 2
-...
-
-## Common Points
-...
-
-## Differences
-...
-
-## Contradictions
-...
-
-## Overall Synthesis
-...
-
-Research Paper Context:
---------------------------------
+Paper evidence:
 {paper_context}
---------------------------------
 
-Question:
-{question}
-
-Answer:
+Question: {question}
 """
-
-    response = client.chat.completions.create(
-        model="nvidia/nemotron-3-ultra-550b-a55b:free",
-        messages=[
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ],
-        temperature=0.2,
-        timeout=60
-    )
-
-    return response.choices[0].message.content
+    try:
+        return _generate(
+            prompt,
+            settings.OPENROUTER_SYNTHESIS_MODEL,
+            timeout=60,
+        )
+    except LLMGenerationError:
+        logger.warning("Returning retrieved evidence because synthesis generation failed.")
+        return _evidence_fallback(paper_context, synthesis=True)
 
 
-def generate_evidence_comparison(
-    question: str,
-    paper_context: str
-) -> str:
-    """
-    Compare evidence across papers and identify
-    common points, differences, and actual contradictions.
-    """
-
-    prompt = f"""
-You are an AI research comparison assistant.
-
-You are given evidence retrieved from multiple research papers.
-
-Your task is to compare the papers strictly using the
-provided evidence.
-
-IMPORTANT RULES:
-
-1. Use ONLY the supplied paper evidence.
-2. Do not use outside knowledge.
-3. Do not invent facts or claims.
-4. Every important claim must be traceable to a paper and page.
-5. A difference is NOT automatically a contradiction.
-6. Different terminology does NOT constitute a contradiction.
-7. Different levels of detail do NOT constitute a contradiction.
-8. A contradiction requires two papers to make incompatible
-   claims about the same subject.
-9. If the evidence does not establish a contradiction,
-   explicitly say that no contradiction was identified.
-10. If evidence is insufficient, say so instead of guessing.
-
-For each paper:
-
-- Identify the claims relevant to the question.
-- Include the page number.
-- Keep the claim faithful to the source.
-
-Then compare the claims.
-
-Use this structure:
-
-## Paper-wise Evidence
-
-### Paper 1
-- Claim
-- Page
-
-### Paper 2
-- Claim
-- Page
-
-## Common Points
-
-List claims supported by multiple papers.
-
-## Differences
-
-List differences in:
-- terminology
-- emphasis
-- scope
-- level of detail
-- approach
-
-Do NOT call these contradictions unless the claims conflict.
-
-## Contradiction Analysis
-
-For each possible contradiction:
-
-### Candidate
-- Paper 1 claim:
-- Paper 2 claim:
-- Analysis:
-- Contradiction: Yes/No
-- Evidence:
-
-If there are no actual contradictions:
-
-"No contradiction was identified in the retrieved evidence."
-
-## Evidence Gaps
-
-Identify anything that cannot be determined from
-the retrieved evidence.
-
-## Overall Synthesis
-
-Provide a concise synthesis based only on the evidence.
-
-Research Paper Evidence:
---------------------------------
-{paper_context}
---------------------------------
-
-Question:
-{question}
-
-Answer:
-"""
-
-    response = client.chat.completions.create(
-        model="nvidia/nemotron-3-ultra-550b-a55b:free",
-        messages=[
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ],
-        temperature=0.1,
-        timeout=60
-    )
-
-    return response.choices[0].message.content
+def generate_evidence_comparison(question: str, paper_context: str) -> str:
+    return generate_synthesis(question, paper_context)
